@@ -18,8 +18,3 @@ proc createBlockAssets(modid, name: string) =
     writeFile("assets/"&modid&"/models/item/"&name&".json","{\"parent\": \""&modid&":block/"&name&"\"}");
     echo "> Создаем файл `assets/"&modid&"/models/block/"&name&".json`"
     writeFile("assets/"&modid&"/models/block/"&name&".json","{\"parent\":\"block/cube\",\"textures\":{\"down\":\""&modid&":block/"&name&"\",\"up\":\""&modid&":block/"&name&"\",\"north\":\""&modid&":block/"&name&"\",\"east\":\""&modid&":block/"&name&"\",\"south\":\""&modid&":block/"&name&"\",\"west\":\""&modid&":block/"&name&"\",\"particle\":\"block/lapis_block\"}}");
-
-
-createAssetsDirectory("hitech_assets")
-for mineral in ["petalite","lepidolite","rutile","ilmenite","olivine","erythrite","dolomite","skutterudite","sphalerite"]:
-    createBlockAssets("hitech_assets", "mineral_"&mineral)
