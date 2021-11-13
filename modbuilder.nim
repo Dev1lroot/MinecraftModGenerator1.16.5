@@ -1,6 +1,11 @@
-import os, sequtils, strutils
+import os, sequtils, strutils, json
 
 # David Eichendorf 2021 - 2022 Nim Minecraft Mod Builder
+
+type
+  ForgeLang* = object
+    key*: string
+    val*: string
 
 type
   ForgeModItem* = object
@@ -16,6 +21,21 @@ type
     classpath*: string
     directory*: string
     registry*: seq[ForgeModItem]
+    language*: seq[ForgeLang]
+
+type
+  Block* = object
+    hardness*:float
+    material*:string
+    resistance*:float
+    className*:string
+    registryName*:string
+    displayName*:string
+    packagePath*:string
+    maxStackSize*:int
+    harvestLevel*:int
+    harvestTool*:string
+    sound*:string
 
 var dump_mainclass = """
 package %package%;
@@ -58,7 +78,7 @@ public class %classname% extends Block
 {
     public %classname%()
     {
-        super(Properties.create(Material.ROCK));
+        super(%properties%);
     }
     @Override
     public BlockRenderType getRenderType(BlockState blockState) {
@@ -87,8 +107,9 @@ public class StartupCommon
     }
     @SubscribeEvent
     public static void onItemsRegistration(final RegistryEvent.Register<Item> itemRegisterEvent) {
-        final int MAXIMUM_STACK_SIZE = 20;
-        Item.Properties itemProperties = new Item.Properties().maxStackSize(MAXIMUM_STACK_SIZE).group(ItemGroup.BUILDING_BLOCKS);
+        Item.Properties itemProperties = new Item.Properties()
+            .maxStackSize(64)
+            .group(ItemGroup.BUILDING_BLOCKS);
         theBlockItem = new BlockItem(theBlock, itemProperties);
         theBlockItem.setRegistryName(theBlock.getRegistryName());
         itemRegisterEvent.getRegistry().register(theBlockItem);
@@ -109,6 +130,15 @@ public class StartupClientOnly
     public static void onClientSetupEvent(FMLClientSetupEvent event)
     {
         RenderTypeLookup.setRenderLayer(StartupCommon.theBlock, RenderType.getSolid());
+    }
+}
+"""
+var dump_pack_mcmeta = """
+{
+    "pack": {
+        "description": "%desc%",
+        "pack_format": 6,
+        "_comment": "Created with Dev1lroot's ModMaker"
     }
 }
 """
@@ -137,6 +167,7 @@ proc createProjectDirectory(m: ForgeMod) =
     createFolder(m.directory&"src/main/java/"&m.classpath.replace(".","/"))
 
     echo "\t# Resources:"
+    createFile(m.directory&"src/main/resources/pack.mcmeta",dump_pack_mcmeta.replace("%desc%",m.modid))
     for p in ["assets/"&m.modid,"data","META-INF"]:
         createFolder(m.directory&"src/main/resources/"&p)
 
@@ -168,30 +199,69 @@ proc createBlockAssets(m: ForgeMod, name: string) =
     createFile(m.directory&"src/main/resources/assets/"&m.modid&"/models/item/"&name&".json","{\"parent\": \""&m.modid&":block/"&name&"\"}");
     createFile(m.directory&"src/main/resources/assets/"&m.modid&"/models/block/"&name&".json","{\"parent\":\"block/cube\",\"textures\":{\"down\":\""&m.modid&":block/"&name&"\",\"up\":\""&m.modid&":block/"&name&"\",\"north\":\""&m.modid&":block/"&name&"\",\"east\":\""&m.modid&":block/"&name&"\",\"south\":\""&m.modid&":block/"&name&"\",\"west\":\""&m.modid&":block/"&name&"\",\"particle\":\"block/lapis_block\"}}");
 
-proc createBlockSource(m: ForgeMod, i: ForgeModItem) =
+proc createBlockSource(m: ForgeMod, b: Block) =
     echo "\t# Source:"
-    var classname = capitalizeAscii(i.name.replace("_"," ")).replace(" ","")
-    var blockpath = m.directory&"src/main/java/"&concatClasspath(@[m.classpath,i.path,i.name]).replace(".","/")
+    var blockpath = m.directory&"src/main/java/"&concatClasspath(@[m.classpath,b.packagePath,b.registryName]).replace(".","/")
     createFolder(blockpath)
-    createFile(blockpath&"/"&classname&".java",dump_block_main
-        .replace("%package%",concatClasspath(@[m.classpath,i.path,i.name]))
-        .replace("%classname%",classname))
+
+    var props = "Properties"
+    props &= ".create(Material."&b.material&")"
+    # if b.sound.len > 0:
+    #     props &= ".sound(SoundType."&b.sound&")"
+    if b.hardness > 0.0 or b.resistance > 0.0:
+        props &= ".hardnessAndResistance(" & $b.hardness & "f, " & $b.resistance & "f)"
+    if b.harvestLevel > 0:
+        props &= ".harvestLevel(" & $b.harvestLevel & ")"
+    # if b.harvestTool.len > 0:
+    #     props &= ".harvestTool(ToolType." & $b.harvestTool & ")"
+
+    createFile(blockpath&"/"&b.className&".java",dump_block_main
+        .replace("%package%",concatClasspath(@[m.classpath,b.packagePath,b.registryName]))
+        .replace("%classname%",b.className)
+        .replace("%properties%",props))
+
     createFile(blockpath&"/StartupCommon.java",dump_block_startup
-        .replace("%package%",concatClasspath(@[m.classpath,i.path,i.name]))
-        .replace("%classname%",classname)
-        .replace("%name%",i.name)
+        .replace("%package%",concatClasspath(@[m.classpath,b.packagePath,b.registryName]))
+        .replace("%classname%",b.className)
+        .replace("%name%",b.registryName)
         .replace("%modid%",m.modid))
+
     createFile(blockpath&"/StartupClientOnly.java",dump_block_startup_clientonly
-        .replace("%package%",concatClasspath(@[m.classpath,i.path,i.name])))
+        .replace("%package%",concatClasspath(@[m.classpath,b.packagePath,b.registryName])))
 
+proc create*(m: ForgeMod, n: Block): ForgeMod =
+    var b = n
 
-proc createBlock*(m: ForgeMod, name, path: string): ForgeMod =
-    echo "Creating Block: ",name
-    var o = ForgeModItem(name: name, kind: "block", path: path)
+    # default values declaration
+    #
+    if 1 > b.displayName.len:
+        b.displayName = capitalizeAscii(b.registryName.replace("_"," "))
+    if 1 > b.className.len:
+        b.className = capitalizeAscii(b.registryName.replace("_"," ")).replace(" ","")
+    if 0 > b.resistance:
+        b.resistance = 1;
+    if 0 > b.hardness:
+        b.hardness = 1
+    if 1 > b.material.len:
+        b.material = "ROCK"
+    if 1 > b.sound.len:
+        b.sound = "STONE"
+    if 0 > b.harvestLevel:
+        b.harvestLevel = 1
+    if 1 > b.harvestTool.len:
+        b.harvestTool = "PICKAXE"
+    if 1 > b.maxStackSize:
+        b.maxStackSize = 64
+    #
+    # ==========================
+
+    echo "Creating Block: ",b.displayName
+    var o = ForgeModItem(name: b.registryName, kind: "block", path: b.packagePath)
     var u = m
     u.registry.add o
-    createBlockSource(u, o)
-    createBlockAssets(u, name)
+    u.language.add ForgeLang(key: concatClasspath(@["block",m.modid,b.registryName]), val: b.displayName)
+    createBlockSource(u, b)
+    createBlockAssets(u, b.registryName)
     return u
 
 proc createMeta(m: ForgeMod) =
@@ -213,9 +283,18 @@ proc createMainClass(m: ForgeMod) =
 
     createFile(m.directory&"src/main/java/"&m.classpath.replace(".","/")&"/"&m.mainclass&".java",main)
 
+proc createLang(m: ForgeMod) =
+    echo "Creating en_us.json"
+    var s = parseJson("{}")
+    for r in m.language:
+        s[r.key] = newJString(r.val)
+    createFile(m.directory&"src/main/resources/assets/"&m.modid&"/lang/en_us.json",pretty(s))
+
 proc init*(m: ForgeMod) =
     createProjectDirectory(m)
 
 proc build*(m: ForgeMod) =
     createMainClass(m)
     createMeta(m)
+    createLang(m)
+
