@@ -24,18 +24,23 @@ type
     language*: seq[ForgeLang]
 
 type
-  Block* = object
+  ForgeModComponent* {.inheritable.} = object
+    displayName*:string
+
+type
+  Block* = object of ForgeModComponent
     hardness*:float
     material*:string
     resistance*:float
     className*:string
     registryName*:string
-    displayName*:string
     packagePath*:string
     maxStackSize*:int
     harvestLevel*:int
     harvestTool*:string
     sound*:string
+
+
 
 var dump_mainclass = """
 package %package%;
@@ -297,4 +302,8 @@ proc build*(m: ForgeMod) =
     createMainClass(m)
     createMeta(m)
     createLang(m)
+
+# createAssetsDirectory("hitech_assets")
+# for mineral in ["petalite","lepidolite","rutile","ilmenite","olivine","erythrite","dolomite","skutterudite","sphalerite"]:
+#     createBlockAssets("hitech_assets", "mineral_"&mineral)
 
